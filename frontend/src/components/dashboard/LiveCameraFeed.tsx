@@ -2,12 +2,14 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { Camera, CameraOff, RefreshCw, Cpu, Eye, ZapOff } from 'lucide-react'
 import type { Prediction } from '../../services/api'
 
-const ANALYZE_ENDPOINT = `http://${window.location.hostname}:8000/api/predict-frame`
-const CAPTURE_INTERVAL_MS = 2000
-const MAX_WIDTH = 640
+const ANALYZE_ENDPOINT = '/api/predict-frame'
+const CAPTURE_INTERVAL_MS = 1000
+const MAX_WIDTH = 480
 
 interface LiveCameraFeedProps {
-    onPrediction?: (pred: Prediction) => void
+    ws: WebSocket | null
+    siteId: string
+    prediction: Prediction | null
 }
 
 const STATUS_CFG = {
@@ -16,7 +18,7 @@ const STATUS_CFG = {
     pollutant: { label: 'POLLUTANT DETECTED', color: '#ef4444', border: 'border-red-500/50', glow: '0 0 24px rgba(239,68,68,0.35)' },
 }
 
-export default function LiveCameraFeed({ onPrediction }: LiveCameraFeedProps) {
+export default function LiveCameraFeed({ ws, siteId, prediction }: LiveCameraFeedProps) {
     const videoRef = useRef<HTMLVideoElement>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const streamRef = useRef<MediaStream | null>(null)
@@ -24,7 +26,7 @@ export default function LiveCameraFeed({ onPrediction }: LiveCameraFeedProps) {
 
     const [cameraOn, setCameraOn] = useState(false)
     const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
-    const [prediction, setPrediction] = useState<Prediction | null>(null)
+    // prediction is now passed via props from the WebSocket broadcast
     const [analyzing, setAnalyzing] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [fps, setFps] = useState<number | null>(null)
@@ -44,28 +46,31 @@ export default function LiveCameraFeed({ onPrediction }: LiveCameraFeedProps) {
         const ctx = canvas.getContext('2d')!
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-        // JPEG @ 0.72 quality keeps size small
-        const b64 = canvas.toDataURL('image/jpeg', 0.72)
+        // JPEG @ 0.6 quality keeps size small
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6)
+        // Send raw base64 without the 'data:image/jpeg;base64,' prefix
+        const b64 = dataUrl.split(',')[1]
 
-        setAnalyzing(true)
-        const t0 = performance.now()
-        try {
-            const res = await fetch(ANALYZE_ENDPOINT, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: b64 }),
-            })
-            const data: Prediction = await res.json()
-            setPrediction(data)
-            onPrediction?.(data)
-            const elapsed = performance.now() - t0
-            setFps(Math.round(1000 / Math.max(elapsed, 100)))
-        } catch (e) {
-            // silently skip — keep trying
-        } finally {
-            setAnalyzing(false)
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            setAnalyzing(true)
+            try {
+                ws.send(JSON.stringify({
+                    type: 'camera_frame',
+                    site_id: siteId,
+                    image: b64
+                }))
+            } catch (err) {
+                // Ignore socket abruptly closing
+            }
+
+            // Note: Since it's WS, prediction will arrive asynchronously via the standard websocket handler in Dashboard
+            setTimeout(() => setAnalyzing(false), 300)
+
+            setError(null)
+        } else {
+            setError('WebSocket disconnected')
         }
-    }, [onPrediction])
+    }, [ws, siteId])
 
     // ── Start camera ─────────────────────────────────────────────────────────
     const startCamera = useCallback(async (facing: 'environment' | 'user') => {
@@ -109,7 +114,6 @@ export default function LiveCameraFeed({ onPrediction }: LiveCameraFeedProps) {
         streamRef.current = null
         if (videoRef.current) videoRef.current.srcObject = null
         setCameraOn(false)
-        setPrediction(null)
         setFps(null)
     }, [])
 

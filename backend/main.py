@@ -41,12 +41,23 @@ app.include_router(alerts.router)
 app.include_router(camera_prediction.router)
 
 
+import json
+from routes.camera_prediction import process_ws_frame
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()  # keep-alive ping
+            data = await websocket.receive_text()
+            if data == "ping":
+                continue
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "camera_frame":
+                    await process_ws_frame(msg)
+            except Exception:
+                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

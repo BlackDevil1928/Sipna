@@ -25,6 +25,11 @@ def _decode_frame(b64: str) -> np.ndarray:
     # Strip data-URL prefix if present
     if "," in b64:
         b64 = b64.split(",", 1)[1]
+    
+    # Ensure correct padding and strip whitespace
+    b64 = b64.strip()
+    b64 += "=" * ((4 - len(b64) % 4) % 4)
+    
     raw = base64.b64decode(b64)
     arr = np.frombuffer(raw, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -128,6 +133,8 @@ def _analyze_frame(img: np.ndarray) -> dict:
     )
 
 
+import asyncio
+
 @router.post("/predict-frame")
 async def predict_frame(payload: FramePayload):
     """
@@ -136,11 +143,12 @@ async def predict_frame(payload: FramePayload):
     broadcast result over WebSocket, and return the prediction.
     """
     try:
-        img = _decode_frame(payload.image)
+        # Offload blocking CPU-bound OpenCV operations to a separate thread
+        img = await asyncio.to_thread(_decode_frame, payload.image)
+        result = await asyncio.to_thread(_analyze_frame, img)
     except Exception as e:
-        return {"error": f"Image decode failed: {e}"}
+        return {"error": f"Image processing failed: {e}"}
 
-    result = _analyze_frame(img)
     debug  = result.pop("_debug", {})
 
     # ── Persist to PostgreSQL ─────────────────────────────────────────────────
@@ -183,3 +191,55 @@ async def predict_frame(payload: FramePayload):
     await manager.broadcast({"type": "prediction", "data": result})
 
     return {**result, "_debug": debug}
+
+async def process_ws_frame(msg: dict):
+    payload_img = msg.get("image")
+    if not payload_img: return
+    try:
+        img = await asyncio.to_thread(_decode_frame, payload_img)
+        result = await asyncio.to_thread(_analyze_frame, img)
+    except Exception as e:
+        print(f"WS image processing error: {e}")
+        return
+
+    result.pop("_debug", {})
+
+    pred = Prediction(
+        timestamp=datetime.fromisoformat(result["timestamp"]),
+        status=result["status"],
+        confidence=result["confidence"],
+        turbidity=result["turbidity"],
+        ph=result["ph"],
+        compliance_score=result["compliance_score"],
+        site_id=result["site_id"],
+    )
+    with Session(engine) as session:
+        session.add(pred)
+
+        if result["status"] == "pollutant":
+            alert = Alert(
+                severity="critical",
+                message=(f"🎥 REMOTE CAMERA: Pollutant detected! Turbidity={result['turbidity']} NTU, pH={result['ph']}"),
+                site_id=result["site_id"],
+            )
+            session.add(alert)
+        elif result["status"] == "moderate" and result["turbidity"] > 15:
+            alert = Alert(
+                severity="warning",
+                message=(f"🎥 REMOTE CAMERA: Elevated turbidity {result['turbidity']} NTU"),
+                site_id=result["site_id"],
+            )
+            session.add(alert)
+
+        session.commit()
+
+    # Broadcast both full stream with frame AND regular prediction for KPI updates
+    await manager.broadcast({
+        "type": "live_stream",
+        "image": payload_img,
+        "prediction": result
+    })
+    await manager.broadcast({
+        "type": "prediction",
+        "data": result
+    })

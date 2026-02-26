@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Camera, Monitor } from 'lucide-react'
 import KPICards from '../components/dashboard/KPICards'
 import LiveMonitor from '../components/dashboard/LiveMonitor'
 import LiveCameraFeed from '../components/dashboard/LiveCameraFeed'
+import LiveRemoteFeed from '../components/dashboard/LiveRemoteFeed'
 import AlertsPanel from '../components/dashboard/AlertsPanel'
 import MultiSiteStatus from '../components/dashboard/MultiSiteStatus'
 import TrendChart from '../components/dashboard/TrendChart'
@@ -29,7 +30,9 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
     const [alerts, setAlerts] = useState<Alert[]>([])
     const [sites, setSites] = useState<Prediction[]>([])
     const [connected, setConnected] = useState(false)
-    const [feedMode, setFeedMode] = useState<'simulated' | 'camera'>('simulated')
+    const [feedMode, setFeedMode] = useState<'simulated' | 'local_camera' | 'remote_stream'>('simulated')
+    const [liveFrame, setLiveFrame] = useState<{ img: string, pred: Prediction } | null>(null)
+    const wsRef = useRef<WebSocket | null>(null)
 
     // Initial load
     useEffect(() => {
@@ -49,14 +52,16 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
                     setConnected(true)
                     onConnect(true)
                     setPrediction(pred)
-                    setHistory(prev => {
-                        const next = [...prev, pred]
-                        return next.slice(-60)
-                    })
-                    // Check for new alert conditions
+                    setHistory(prev => [...prev, pred].slice(-60))
                     if (pred.status === 'pollutant' || (pred.status === 'moderate' && pred.turbidity > 15)) {
                         fetchAlerts(selectedSite, 50).then(setAlerts)
                     }
+                },
+                (img: string, pred: Prediction) => {
+                    setConnected(true)
+                    onConnect(true)
+                    setLiveFrame({ img, pred })
+                    // History and prediction already handled by standard prediction WS event which arrives simultaneously
                 },
                 () => {
                     setConnected(false)
@@ -71,6 +76,7 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
                 onConnect(false)
                 setTimeout(connect, 3000)
             }
+            wsRef.current = ws
         }
 
         connect()
@@ -88,15 +94,6 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
             setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a))
         })
     }, [])
-
-    // Camera predictions feed into same state as WebSocket
-    const handleCameraPrediction = useCallback((pred: Prediction) => {
-        setPrediction(pred)
-        setHistory(prev => [...prev, pred].slice(-60))
-        if (pred.status === 'pollutant' || (pred.status === 'moderate' && pred.turbidity > 15)) {
-            fetchAlerts(selectedSite, 50).then(setAlerts)
-        }
-    }, [selectedSite])
 
     return (
         <div className="flex-1 overflow-y-auto bg-[#0a0e1a] bg-grid p-6 space-y-6">
@@ -120,13 +117,22 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
                         <Monitor className="w-3.5 h-3.5" /> Simulated
                     </button>
                     <button
-                        onClick={() => setFeedMode('camera')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${feedMode === 'camera'
+                        onClick={() => setFeedMode('local_camera')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${feedMode === 'local_camera'
                             ? 'bg-red-500/15 text-red-400 border border-red-500/30'
                             : 'text-[#8a9ab5] hover:text-white'
                             }`}
                     >
-                        <Camera className="w-3.5 h-3.5" /> Live Camera
+                        <Camera className="w-3.5 h-3.5" /> Local Node Send
+                    </button>
+                    <button
+                        onClick={() => setFeedMode('remote_stream')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${feedMode === 'remote_stream'
+                            ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+                            : 'text-[#8a9ab5] hover:text-white'
+                            }`}
+                    >
+                        <Monitor className="w-3.5 h-3.5" /> Remote Watch
                     </button>
                 </div>
             </div>
@@ -139,8 +145,10 @@ export default function Dashboard({ selectedSite, onConnect }: DashboardProps) {
             {/* Main grid: monitor/camera + alerts */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 fade-in-up">
                 <div className="xl:col-span-2">
-                    {feedMode === 'camera' ? (
-                        <LiveCameraFeed onPrediction={handleCameraPrediction} />
+                    {feedMode === 'local_camera' ? (
+                        <LiveCameraFeed ws={wsRef.current} siteId={selectedSite} prediction={prediction} />
+                    ) : feedMode === 'remote_stream' ? (
+                        <LiveRemoteFeed latestFrame={liveFrame?.img ?? null} prediction={liveFrame?.pred ?? null} connected={connected} />
                     ) : (
                         <LiveMonitor prediction={prediction} connected={connected} />
                     )}

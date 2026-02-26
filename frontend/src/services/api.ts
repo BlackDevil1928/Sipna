@@ -18,11 +18,11 @@ export interface Alert {
     acknowledged: boolean
 }
 
-// Dynamically resolve backend host — works both on desktop (localhost)
-// and on mobile accessing via LAN IP (e.g. 192.168.x.x)
-const BACKEND_HOST = window.location.hostname
-const BASE_URL = `http://${BACKEND_HOST}:8000`
-const WS_URL = `ws://${BACKEND_HOST}:8000/ws`
+// With Vite proxy configured, we can just use relative paths for REST APIs.
+// This magically solves HTTPS/HTTP Mixed Content errors when using Ngrok!
+const BASE_URL = ''
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+const WS_URL = `${wsProtocol}//${window.location.host}/ws`
 
 // ─── REST API ────────────────────────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ export async function acknowledgeAlert(alertId: number): Promise<void> {
 
 export function createWebSocket(
     onPrediction: (pred: Prediction) => void,
+    onLiveStream?: (img: string, pred: Prediction) => void,
     onError?: () => void
 ): WebSocket {
     const ws = new WebSocket(WS_URL)
@@ -83,6 +84,8 @@ export function createWebSocket(
             const msg = JSON.parse(event.data)
             if (msg.type === 'prediction') {
                 onPrediction(msg.data as Prediction)
+            } else if (msg.type === 'live_stream') {
+                onLiveStream?.(msg.image, msg.prediction as Prediction)
             }
         } catch { /* ignore malformed */ }
     }
@@ -91,7 +94,15 @@ export function createWebSocket(
 
     // Ping every 5s to keep alive
     const ping = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send('ping')
+        try {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('ping')
+            } else if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+                clearInterval(ping)
+            }
+        } catch {
+            clearInterval(ping)
+        }
     }, 5000)
 
     ws.onclose = () => clearInterval(ping)
