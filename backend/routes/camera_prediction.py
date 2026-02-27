@@ -1,6 +1,16 @@
+"""
+Camera prediction routes — processes frames from mobile camera nodes.
+
+Pipeline:
+  1. Decode base64 JPEG → OpenCV BGR array
+  2. Run through PyTorch severity model (deterministic)
+  3. Persist prediction + alerts to PostgreSQL
+  4. Broadcast over WebSocket to dashboard
+  5. Fire critical alert monitor for Vapi calls
+"""
+
 import base64
-import io
-import random
+import asyncio
 from datetime import datetime
 
 import cv2
@@ -12,8 +22,32 @@ from sqlmodel import Session
 from database import engine
 from models.prediction_model import Prediction, Alert
 from services.websocket_manager import manager
+from services.critical_alert_service import critical_alert_service
+from services.ai_inference import pytorch_inference
 
 router = APIRouter(prefix="/api", tags=["camera"])
+
+# ── Alert Debounce System ─────────────────────────────────────────────────────
+# Prevents alert spam by enforcing a cooldown between alerts of the same type.
+# Only creates alerts when model confidence exceeds a meaningful threshold.
+import time
+
+ALERT_COOLDOWN_SECONDS = 30  # Minimum seconds between alerts of the same severity
+ALERT_CONFIDENCE_THRESHOLD = 60.0  # Only alert when model is >60% confident
+
+_last_alert_time: dict = {}  # key: f"{site_id}_{severity}" → timestamp
+
+def _should_create_alert(site_id: str, severity: str, confidence: float) -> bool:
+    """Returns True only if enough time has passed and confidence is high enough."""
+    if confidence < ALERT_CONFIDENCE_THRESHOLD:
+        return False
+    key = f"{site_id}_{severity}"
+    now = time.time()
+    last = _last_alert_time.get(key, 0.0)
+    if (now - last) < ALERT_COOLDOWN_SECONDS:
+        return False
+    _last_alert_time[key] = now
+    return True
 
 
 class FramePayload(BaseModel):
@@ -22,14 +56,12 @@ class FramePayload(BaseModel):
 
 def _decode_frame(b64: str) -> np.ndarray:
     """Decode base64 JPEG/PNG string → BGR numpy array."""
-    # Strip data-URL prefix if present
     if "," in b64:
         b64 = b64.split(",", 1)[1]
-    
-    # Ensure correct padding and strip whitespace
+
     b64 = b64.strip()
     b64 += "=" * ((4 - len(b64) % 4) % 4)
-    
+
     raw = base64.b64decode(b64)
     arr = np.frombuffer(raw, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -38,118 +70,34 @@ def _decode_frame(b64: str) -> np.ndarray:
     return img
 
 
-def _analyze_frame(img: np.ndarray) -> dict:
-    """
-    Heuristic water quality analysis using OpenCV color statistics.
-
-    Logic:
-      • High blue relative to red/green       → clear water
-      • Brown / muddy (high R, low B, low S)  → pollutant
-      • Medium saturation + green tones       → moderate
-    Turbidity is estimated from colour variance (σ of V channel).
-    pH is inferred from dominant hue band.
-    """
-    # Resize to fixed input (640 wide max already enforced by frontend)
-    h, w = img.shape[:2]
-    if w > 640:
-        scale = 640 / w
-        img = cv2.resize(img, (640, int(h * scale)))
-
-    # ── Channel means in BGR ──────────────────────────────────────────────────
-    b_mean = float(np.mean(img[:, :, 0]))
-    g_mean = float(np.mean(img[:, :, 1]))
-    r_mean = float(np.mean(img[:, :, 2]))
-
-    # ── HSV analysis ──────────────────────────────────────────────────────────
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
-    h_ch, s_ch, v_ch = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-
-    avg_hue = float(np.mean(h_ch))          # 0–180 in OpenCV
-    avg_sat = float(np.mean(s_ch)) / 255.0  # 0–1
-    avg_val = float(np.mean(v_ch)) / 255.0  # 0–1 (brightness)
-    val_std = float(np.std(v_ch)) / 255.0   # spread → turbidity proxy
-
-    # ── Blue-dominance ratio ──────────────────────────────────────────────────
-    total_rgb = b_mean + g_mean + r_mean + 1e-6
-    blue_ratio  = b_mean / total_rgb
-    red_ratio   = r_mean / total_rgb
-    green_ratio = g_mean / total_rgb
-
-    # ── Brown/muddy mask (high R, low B, low S) ───────────────────────────────
-    brown_lower = np.array([5, 40, 40])
-    brown_upper = np.array([25, 255, 200])
-    brown_mask  = cv2.inRange(hsv.astype(np.uint8), brown_lower, brown_upper)
-    brown_ratio = float(np.sum(brown_mask > 0)) / brown_mask.size
-
-    # ── Blue/teal water mask ──────────────────────────────────────────────────
-    water_lower = np.array([90, 30, 40])
-    water_upper = np.array([130, 255, 255])
-    water_mask  = cv2.inRange(hsv.astype(np.uint8), water_lower, water_upper)
-    water_ratio = float(np.sum(water_mask > 0)) / water_mask.size
-
-    # ── Decision logic ────────────────────────────────────────────────────────
-    if brown_ratio > 0.20 or (red_ratio > 0.40 and avg_sat < 0.25):
-        status = "pollutant"
-        turbidity    = round(random.uniform(35, 120) + val_std * 80, 2)
-        ph           = round(random.uniform(4.0, 6.5)  + random.gauss(0, 0.3), 2)
-        compliance   = round(random.uniform(10, 50), 1)
-        confidence   = round(random.uniform(80, 95), 1)
-
-    elif water_ratio > 0.15 or (blue_ratio > 0.36 and avg_sat > 0.30):
-        status = "clear"
-        turbidity    = round(random.uniform(0.5, 4)   + val_std * 10, 2)
-        ph           = round(random.uniform(6.8, 7.5) + random.gauss(0, 0.1), 2)
-        compliance   = round(random.uniform(88, 100), 1)
-        confidence   = round(random.uniform(85, 98), 1)
-
-    else:
-        status = "moderate"
-        turbidity    = round(random.uniform(5, 28)    + val_std * 30, 2)
-        ph           = round(random.uniform(6.0, 8.5) + random.gauss(0, 0.2), 2)
-        compliance   = round(random.uniform(60, 88), 1)
-        confidence   = round(random.uniform(72, 90), 1)
-
-    # Clamp values to realistic ranges
-    turbidity  = round(max(0.1, min(turbidity, 200)), 2)
-    ph         = round(max(2.0, min(ph, 12.0)), 2)
-    compliance = round(max(0, min(compliance, 100)), 1)
-    confidence = round(max(50, min(confidence, 99)), 1)
-
-    return dict(
-        timestamp=datetime.utcnow().isoformat(),
-        status=status,
-        confidence=confidence,
-        turbidity=turbidity,
-        ph=ph,
-        compliance_score=compliance,
-        site_id="SITE-01",
-        # debug info (not stored)
-        _debug=dict(
-            blue_ratio=round(blue_ratio, 3),
-            brown_ratio=round(brown_ratio, 3),
-            water_ratio=round(water_ratio, 3),
-            avg_sat=round(avg_sat, 3),
-        ),
-    )
-
-
-import asyncio
-
 @router.post("/predict-frame")
 async def predict_frame(payload: FramePayload):
     """
     Receive a JPEG base64 frame from the frontend camera,
-    analyse it with OpenCV heuristics, persist to DB,
+    run through the trained PyTorch model, persist to DB,
     broadcast result over WebSocket, and return the prediction.
     """
     try:
-        # Offload blocking CPU-bound OpenCV operations to a separate thread
         img = await asyncio.to_thread(_decode_frame, payload.image)
-        result = await asyncio.to_thread(_analyze_frame, img)
+        result = await asyncio.to_thread(pytorch_inference.predict, img)
+        result["timestamp"] = datetime.utcnow().isoformat()
+        result["site_id"] = "SITE-01"
     except Exception as e:
-        return {"error": f"Image processing failed: {e}"}
+        # DO NOT send fake values on failure
+        return {
+            "status": "MODEL_ERROR",
+            "confidence": 0.0,
+            "turbidity": 0.0,
+            "ph": 0.0,
+            "compliance_score": 0.0,
+            "error": f"Image processing failed: {e}"
+        }
 
-    debug  = result.pop("_debug", {})
+    # Skip DB/broadcast if model returned an error
+    if result.get("status") == "MODEL_ERROR":
+        return result
+
+    debug = result.pop("_debug", {})
 
     # ── Persist to PostgreSQL ─────────────────────────────────────────────────
     pred = Prediction(
@@ -164,8 +112,7 @@ async def predict_frame(payload: FramePayload):
     with Session(engine) as session:
         session.add(pred)
 
-        # Auto-alert on pollutant
-        if result["status"] == "pollutant":
+        if result["status"] == "pollutant" and _should_create_alert(result["site_id"], "critical", result["confidence"]):
             alert = Alert(
                 severity="critical",
                 message=(
@@ -175,7 +122,7 @@ async def predict_frame(payload: FramePayload):
                 site_id=result["site_id"],
             )
             session.add(alert)
-        elif result["status"] == "moderate" and result["turbidity"] > 15:
+        elif result["status"] == "moderate" and result["turbidity"] > 15 and _should_create_alert(result["site_id"], "warning", result["confidence"]):
             alert = Alert(
                 severity="warning",
                 message=(
@@ -190,19 +137,33 @@ async def predict_frame(payload: FramePayload):
     # ── Broadcast over WebSocket ──────────────────────────────────────────────
     await manager.broadcast({"type": "prediction", "data": result})
 
+    # ── Fire to Alert Monitor ─────────────────────────────────────────────────
+    asyncio.create_task(critical_alert_service.check_and_trigger(result))
+
     return {**result, "_debug": debug}
 
+
 async def process_ws_frame(msg: dict):
+    """Process a camera frame received via WebSocket from a mobile edge node."""
     payload_img = msg.get("image")
-    if not payload_img: return
+    if not payload_img:
+        return
+
     try:
         img = await asyncio.to_thread(_decode_frame, payload_img)
-        result = await asyncio.to_thread(_analyze_frame, img)
+        result = await asyncio.to_thread(pytorch_inference.predict, img)
+        result["timestamp"] = datetime.utcnow().isoformat()
+        result["site_id"] = "SITE-01"
     except Exception as e:
         print(f"WS image processing error: {e}")
         return
 
-    result.pop("_debug", {})
+    # Skip broadcast if model returned an error — do NOT send fake data
+    if result.get("status") == "MODEL_ERROR":
+        print(f"MODEL_ERROR: {result.get('_error', 'unknown')}")
+        return
+
+    result.pop("_debug", None)
 
     pred = Prediction(
         timestamp=datetime.fromisoformat(result["timestamp"]),
@@ -216,24 +177,23 @@ async def process_ws_frame(msg: dict):
     with Session(engine) as session:
         session.add(pred)
 
-        if result["status"] == "pollutant":
+        if result["status"] == "pollutant" and _should_create_alert(result["site_id"], "critical", result["confidence"]):
             alert = Alert(
                 severity="critical",
-                message=(f"🎥 REMOTE CAMERA: Pollutant detected! Turbidity={result['turbidity']} NTU, pH={result['ph']}"),
+                message=f"🎥 REMOTE CAMERA: Pollutant detected! Turbidity={result['turbidity']} NTU, pH={result['ph']}",
                 site_id=result["site_id"],
             )
             session.add(alert)
-        elif result["status"] == "moderate" and result["turbidity"] > 15:
+        elif result["status"] == "moderate" and result["turbidity"] > 15 and _should_create_alert(result["site_id"], "warning", result["confidence"]):
             alert = Alert(
                 severity="warning",
-                message=(f"🎥 REMOTE CAMERA: Elevated turbidity {result['turbidity']} NTU"),
+                message=f"🎥 REMOTE CAMERA: Elevated turbidity {result['turbidity']} NTU",
                 site_id=result["site_id"],
             )
             session.add(alert)
 
         session.commit()
 
-    # Broadcast both full stream with frame AND regular prediction for KPI updates
     await manager.broadcast({
         "type": "live_stream",
         "image": payload_img,
@@ -243,3 +203,6 @@ async def process_ws_frame(msg: dict):
         "type": "prediction",
         "data": result
     })
+
+    # ── Fire to Alert Monitor ─────────────────────────────────────────────────
+    asyncio.create_task(critical_alert_service.check_and_trigger(result))

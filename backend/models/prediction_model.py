@@ -25,3 +25,13 @@ class Alert(SQLModel, table=True):
     message: str
     site_id: str = Field(default="SITE-01")
     acknowledged: bool = Field(default=False)
+
+class CallLog(SQLModel, table=True):
+    __tablename__ = "call_logs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    phone_number: str
+    status: str  # "triggered", "failed", "completed"
+    contamination_score: float
+    site_id: str = Field(default="SITE-01")

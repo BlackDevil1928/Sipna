@@ -6,7 +6,7 @@ import type { Prediction } from '../services/api'
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 const WS_URL = `${wsProtocol}//${window.location.host}/ws`
 
-const CAPTURE_INTERVAL_MS = 300 // Super fast 300ms for mobile nodes
+const CAPTURE_INTERVAL_MS = 300 // Slower 1000ms for mobile nodes
 const MAX_WIDTH = 480 // 480px width for efficient bandwidth
 
 export default function MobileCameraPage() {
@@ -21,6 +21,7 @@ export default function MobileCameraPage() {
     const [error, setError] = useState<string | null>(null)
     const [prediction, setPrediction] = useState<Prediction | null>(null)
     const [sessionId, setSessionId] = useState<string | null>(null)
+    const hasAutoStarted = useRef(false)
 
     // Parse URL for QR code pairing session
     useEffect(() => {
@@ -147,7 +148,8 @@ export default function MobileCameraPage() {
 
     // Auto-start camera if we arrived via a QR code scan
     useEffect(() => {
-        if (sessionId && wsConnected && !cameraOn) {
+        if (sessionId && wsConnected && !cameraOn && !hasAutoStarted.current) {
+            hasAutoStarted.current = true
             startCamera()
         }
     }, [sessionId, wsConnected, cameraOn, startCamera])

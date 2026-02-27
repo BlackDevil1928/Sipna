@@ -6,6 +6,7 @@ from sqlmodel import Session
 from database import engine
 from models.prediction_model import Prediction, Alert
 from services.websocket_manager import manager
+from services.critical_alert_service import critical_alert_service
 
 SITES = ["SITE-01", "SITE-02", "SITE-03", "SITE-04"]
 
@@ -49,9 +50,15 @@ def simulate_prediction(site_id: str = "SITE-01") -> dict:
 
 
 async def run_simulator():
-    """Background task: emit a prediction every 2 seconds for the primary site."""
+    """Background task: emit a SIMULATED prediction every 2s for non-camera sites only.
+    
+    IMPORTANT: This generates synthetic data for secondary sites (SITE-02+).
+    It must NOT emit data for SITE-01 because that site receives real AI model
+    predictions from the camera pipeline. Mixing real + fake data on the same
+    site causes the dashboard to show random fluctuations.
+    """
     while True:
-        data = simulate_prediction("SITE-01")
+        data = simulate_prediction("SITE-02")  # Use SITE-02 to avoid polluting real camera data on SITE-01
 
         # Persist to PostgreSQL
         pred = Prediction(**data, timestamp=datetime.fromisoformat(data["timestamp"]))
@@ -78,4 +85,8 @@ async def run_simulator():
 
         # Broadcast over WebSocket
         await manager.broadcast({"type": "prediction", "data": data})
+
+        # Fire to Alert Monitor
+        asyncio.create_task(critical_alert_service.check_and_trigger(data))
+        
         await asyncio.sleep(2)

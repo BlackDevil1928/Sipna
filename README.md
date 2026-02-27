@@ -1,163 +1,130 @@
 # 🌊 AquaGuardian AI
+**Industrial Wastewater Monitoring Dashboard & Edge Node System**
 
-**Industrial Wastewater Monitoring Dashboard**
-
-AquaGuardian AI is a real-time, production-grade monitoring dashboard designed to simulate and visualize AI-powered industrial wastewater pollution detection. It uses computer vision heuristics to analyze live video feeds—including mobile phone cameras—to detect pollutants in real time, and broadcasts the status, turbidity, and estimated pH across the network via WebSocket.
+AquaGuardian AI is a real-time, production-grade monitoring ecosystem designed to democratize AI-powered industrial wastewater pollution detection. By transforming standard mobile phones into intelligent **Edge Camera Nodes**, it uses computer vision heuristics to analyze live video feeds for pollutants in real-time. It features zero-touch QR pairing, instantaneous WebSocket broadcasting, and automated outbound Vapi AI distress calls for critical anomaly management.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![React](https://img.shields.io/badge/React-19.0.0-61dafb.svg?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?logo=typescript)
 ![Tailwind](https://img.shields.io/badge/TailwindCSS-4.0-38bdf8.svg?logo=tailwind-css)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg?logo=fastapi)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791.svg?logo=postgresql)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8.svg?logo=opencv)
+![Vapi](https://img.shields.io/badge/Vapi-Voice_AI-FF3B30.svg)
 
 ---
 
-## ✨ Features
+## ✨ System Architecture & Features
 
-- **🔴 Live Mobile Camera Integration**: Stream your mobile phone camera directly into the dashboard over your local network.
-- **🧠 Computer Vision Processing**: The backend analyzes frames in real time using OpenCV (HSV saturation, channel ratios, and color masking) to classify water as _Clear, Moderate, or Pollutant_.
-- **⚡ Real-Time WebSockets**: Instant bidirectional communication for pushing AI predictions and triggering alert panels without polling.
-- **📊 Dynamic KPI Dashboards**: 4 reactive key performance indicators with animated gradients and glow effects representing water status (Clear/Moderate/Pollutant).
-- **📉 Live Analytics**: Historical trend charts tracking Turbidity, pH, and Compliance over time via Recharts.
-- **🏭 Multi-Site Status**: Track multiple industrial plants from a single unified view.
-- **🛡️ Alert System**: Slide-in notification panel for instantaneous pollutant anomaly warnings with acknowledgment capabilities.
-- **🎨 Premium Industrial UI**: Glassmorphism, neon accents, dark mode default, and pulsing live indicators for a true "Mission Control" aesthetic.
+AquaGuardian is split into two dynamically routed interfaces (Desktop Control and Mobile Edge) communicating over a unified bidirectional WebSocket layer.
+
+### 🌐 Core Dashboards & Edge Nodes
+- **📱 Device-Based UI Mode:** The frontend detects device hardware. Laptops render the comprehensive monitoring dashboard, while mobile devices automatically strip down to a specialized, rugged camera transmission interface.
+- **🔗 QR Auto-Pairing (Zero-Touch):** The laptop dashboard generates a secure, expirable UUID. Scanning the QR code natively binds the phone to the dashboard's WebSocket session without manual configuration.
+- **🧠 OpenCV Edge Processing:** The Python backend analyzes incoming camera frames natively (HSV saturation, channel ratios, brown/teal color masking) to classify water as _Clear, Moderate, or Pollutant_.
+- **⚡ Next-Gen WebSockets:** Bidirectional pipelines instantly push AI predictions, live video frames, and remote-pairing handshakes at ~1000ms latency.
+
+### 🚨 Autonomous Emergency Management
+- **🤖 Vapi Voice AI Integration:** An autonomous event-driven microservice (`critical_alert_service`) monitors the OpenCV output.
+- **📞 Outbound Telephony:** If turbidity exceeds critical thresholds (NTU > 45), the backend utilizes HTTPX to trigger the Vapi REST API, initiating immediate outbound phone calls to emergency contacts via Twilio.
+- **🔒 Incident Locking:** Prevents phone spam by enforcing a strict 10-minute cooldown and requiring 10 consecutive "safe" frames before disengaging the incident lock.
+
+### 📊 Real-Time Analytics
+- **KPI Dashboards:** 4 reactive key performance indicators with animated gradients and glow effects representing water status.
+- **Live Trend Charts:** Historical plotting for Turbidity, pH, and Compliance over time via Recharts.
+- **Multi-Site Status:** Track infinite industrial plants from a single unified PostgreSQL database.
 
 ---
 
 ## 🌍 Social Impact & Real-World Value
 
-AquaGuardian AI isn't just a dashboard—it's a highly scalable solution designed to democratize environmental monitoring.
+AquaGuardian AI is fundamentally a highly scalable solution designed to democratize environmental monitoring by removing hardware barriers.
 
-### 1. 🏭 Real-Life Applications
-
-- **Manufacturing & Textile Plants**: Instantly detect harmful dye or chemical leaks in discharge pipes before they reach public waterways.
-- **Municipal Water Treatment**: Provide low-cost preliminary filtration checks at various treatment stages.
-- **Environmental Regulatory Bodies**: Enable inspectors to deploy instant, tamper-proof mobile camera nodes in remote areas without heavy equipment.
-- **Agriculture**: Monitor irrigation channels for sudden spikes in turbidity or mud slides.
+### 1. 🌱 Real-Life Applications
+- **Manufacturing & Textile Plants:** Instantly detect harmful dye or chemical leaks in discharge pipes before they reach public waterways.
+- **Municipal Water Treatment:** Provide low-cost preliminary filtration checks at various treatment stages.
+- **Environmental Regulatory Bodies:** Enable inspectors to deploy instant, tamper-proof mobile camera nodes in remote areas without heavy equipment.
 
 ### 2. 💰 Cost Efficiency
+Traditional industrial water quality sensors (optical turbidity meters, inline pH probes) cost **$5,000 to $20,000+ per installation** and require frequent calibration.
+- By utilizing **off-the-shelf mobile phones** or standard CCTV cameras as optical sensors, AquaGuardian reduces hardware dependency by **95%**.
+- The AI handles the calibration visually, transforming a recycled smartphone into an industrial anomaly detection node.
 
-Traditional industrial water quality sensors (optical turbidity meters, inline pH probes, spectrometer setups) cost anywhere from **$5,000 to $20,000+ per installation** and require frequent calibration and maintenance.
-
-- **Our Solution**: By utilizing **off-the-shelf mobile phones** or standard CCTV cameras as optical sensors, AquaGuardian reduces hardware dependency by **95%**.
-- The AI handles the calibration visually, transforming a $100 recycled smartphone into an industrial-grade anomaly detection node.
-
-### 3. 🌱 Social Impact
-
-- **Prevents Ecological Disasters**: Real-time alerts stop catastrophic pollutant dumping exactly when it happens.
-- **Empowers Local Communities**: Low barrier to entry means smaller, underfunded municipalities in developing nations can now afford 24/7 water monitoring.
-- **Accountability**: Creates an immutable, timestamped record of wastewater compliance, forcing factories to adhere to environmental laws.
-
-### 4. 📈 Scalability & Unique Selling Proposition (USP)
-
-- **The USP**: _Zero-Hardware Computer Vision Edge Nodes_. Instead of wiring proprietary sensors into pipes, you just point a camera at the water.
-- **Limitless Scaling**: Because the heavy lifting is done via highly optimized OpenCV heuristics and WebSockets, you can connect hundreds of mobile camera nodes to a single centralized server simultaneously.
-- **Infrastructure Independent**: Operates flawlessly over standard LAN Wi-Fi or Cellular connections without requiring specialized industrial networks.
+### 3. 📈 Scalability & Unique Selling Proposition (USP)
+- **The USP: Zero-Hardware Computer Vision Edge Nodes.** Instead of wiring proprietary sensors into pipes, you just point a networked camera at the water.
+- **Limitless Scaling:** Because the heavy lifting is done via highly optimized OpenCV heuristics in the cloud, you can connect hundreds of mobile camera nodes to a single centralized server.
 
 ---
 
-## 🏗️ Architecture Stack
+## 💻 Technology Stack
 
-### Frontend (Vite + React + TypeScript)
+### Frontend (Vercel / Vite)
+- **Core:** React 19, TypeScript, Vite 6
+- **Styling:** TailwindCSS v4 with custom CSS variables for dark industrial glassmorphism.
+- **UI Components:** Radix UI primitives, Lucide React icons, Recharts for robust SVG data visualization.
+- **Hardware Integration:** HTML5 `getUserMedia` API, `qrcode.react` for session generation.
 
-- **Styling**: TailwindCSS v4 with custom CSS variables for dark industrial theming
-- **Components**: Radix UI primitives + Lucide React icons
-- **Charts**: Recharts
-- **Routing**: React Router DOM v7
-- **Media**: HTML5 `getUserMedia` API for mobile camera access
-
-### Backend (Python FastAPI)
-
-- **Framework**: FastAPI (Async REST + WebSockets)
-- **Database**: PostgreSQL (via psycopg2)
-- **ORM**: SQLModel (SQLAlchemy 2.0 wrapper)
-- **Computer Vision**: OpenCV (`opencv-python-headless`) + NumPy for heuristic frame analysis
+### Backend (Python / FastAPI)
+- **REST & WS Framework:** FastAPI with Uvicorn ASGIMiddleware.
+- **Computer Vision:** `opencv-python-headless` & NumPy for matrix transformations.
+- **Database:** PostgreSQL (via `asyncpg` and `psycopg2`).
+- **ORM:** SQLModel (SQLAlchemy 2.0 wrapper).
+- **Telephony Pipeline:** `httpx` async client interacting with Vapi & Twilio APIs.
 
 ---
 
 ## 🚀 Quick Start Guide
 
-### Prerequisites
+### 1. Environment Configuration
 
-- Node.js (v18+)
-- Python 3.10+
-- PostgreSQL server running locally
+Create a `.env` file in the `backend/` directory:
+```env
+# Database
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/aquaguardian
+SYNC_DATABASE_URL=postgresql+psycopg2://postgres:password@localhost:5432/aquaguardian
 
-### 1. Database Setup
-
-Create a local PostgreSQL database named `aquaguardian`:
-
-```sql
-CREATE DATABASE aquaguardian;
+# Vapi Telephony Controls
+VAPI_API_KEY=your_private_vapi_key
+VAPI_ASSISTANT_ID=your_assistant_uuid
+TWILIO_PHONE_NUMBER_ID=your_vapi_phone_number_uuid
 ```
 
-_(If your Postgres credentials differ from `postgres:postgres`, update the `SYNC_DATABASE_URL` inside `backend/.env`)_
+Configure `backend/config/emergency_contacts.json`:
+```json
+[
+    {
+        "name": "Plant Manager",
+        "phone": "+1234567890"
+    }
+]
+```
 
 ### 2. Backend Setup
 
 ```bash
 cd backend
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
 
-# Install Python dependencies
-pip install fastapi uvicorn sqlmodel psycopg2-binary websockets python-multipart python-dotenv opencv-python-headless numpy Pillow
-
-# Run the server (bound to 0.0.0.0 for LAN access)
+# Run the server on 0.0.0.0 to allow LAN Mobile traversal
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-_Note: SQLModel will automatically create the required database tables on startup._
 
 ### 3. Frontend Setup
 
 ```bash
 cd frontend
-
-# Install Node dependencies
 npm install
-
-# Start the Vite development server
 npm run dev
 ```
 
 ---
 
-## 📱 Mobile Camera Testing (LAN)
+## 🌐 Production Deployment
 
-To use your mobile phone camera for live wastewater detection:
-
-1. Ensure your PC and mobile device are on the **exact same Wi-Fi network**.
-2. Start the backend with `--host 0.0.0.0` as shown above.
-3. Check the Vite console output for your local Network IP (e.g., `http://192.168.1.5:5173`).
-4. Type that exact URL into your mobile phone's browser.
-5. In the dashboard header, click the **Live Camera** toggle.
-6. Tap **Start Camera** and grant permissions. It will automatically utilize the rear-facing camera.
-7. Point the camera at water (or images of water on another screen). The backend OpenCV engine will analyze the frame every 2 seconds and push results live to the UI!
-
-> **Note on Mobile Browsers:** Most modern mobile browsers block camera access on non-`localhost` `.http` connections. You may need to use [ngrok](https://ngrok.com/) (`ngrok http 5173`) or Vite's basic SSL plugin if you encounter permission blocks.
+For instructions on deploying the full stack to the cloud (Vercel for Frontend, Render/Railway for Backend PostgreSQL + WebSockets), please read the [DEPLOYMENT.md](./DEPLOYMENT.md) guide.
 
 ---
 
-## 🛠️ Project Structure
-
-```text
-AquaGuardian AI/
-├── backend/
-│   ├── main.py                  # FastAPI Entry & WS Endpoint
-│   ├── database.py              # PostgreSQL Session & Engine
-│   ├── models/                  # SQLModel Table Definitions
-│   ├── routes/                  # REST APIs (alerts, predictions, camera)
-│   └── services/                # WS Manager & Background Simulator
-└── frontend/
-    ├── src/
-    │   ├── components/layout/   # Navbar & Sidebar
-    │   ├── components/dashboard/# Charts, LiveFeed, KPIs, Alerts
-    │   ├── pages/               # Main Routing Views
-    │   └── services/api.ts      # Typed API client & WS factory
-    ├── index.css                # Global Theme Variables & Animations
-    └── index.html               # Main Entry
-```
-
----
-
-_Built as a production-level demonstration of integrating real-time computer vision heuristics into a modern web stack._
+*Built as a production-level demonstration of integrating real-time computer vision heuristics, VoIP AI, and Edge Computing into a modern web stack.*

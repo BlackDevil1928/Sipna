@@ -1,12 +1,15 @@
 import asyncio
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import create_db_and_tables
 from routes import prediction, alerts
-from routes import camera_prediction, pairing
+from routes import camera_prediction, pairing, test_vapi, debug_inference
 from services.websocket_manager import manager
 from services.simulator import run_simulator
 
@@ -40,6 +43,8 @@ app.include_router(prediction.router)
 app.include_router(alerts.router)
 app.include_router(camera_prediction.router)
 app.include_router(pairing.router)
+app.include_router(test_vapi.router)
+app.include_router(debug_inference.router)
 
 
 import json
