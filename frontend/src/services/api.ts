@@ -18,11 +18,12 @@ export interface Alert {
     acknowledged: boolean
 }
 
-// With Vite proxy configured, we can just use relative paths for REST APIs.
-// This magically solves HTTPS/HTTP Mixed Content errors when using Ngrok!
-const BASE_URL = ''
+// API Configuration:
+// - Local dev: Leave .env empty → Vite proxy handles routing via relative paths
+// - Production (Vercel): Set VITE_API_BASE_URL and VITE_WS_URL in .env
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-const WS_URL = `${wsProtocol}//${window.location.host}/ws`
+const WS_URL = import.meta.env.VITE_WS_URL || `${wsProtocol}//${window.location.host}/ws`
 
 // ─── REST API ────────────────────────────────────────────────────────────────
 
