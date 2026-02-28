@@ -1,3 +1,10 @@
+const isProd = import.meta.env.PROD;
+const API_BASE = isProd ? "https://aquaguardian-api.onrender.com" : "";
+
+const wsProtocol = isProd ? 'wss:' : (window.location.protocol === 'https:' ? 'wss:' : 'ws:');
+const WS_DOMAIN = isProd ? "aquaguardian-api.onrender.com" : window.location.host;
+const WS_URL = `${wsProtocol}//${WS_DOMAIN}/ws`;
+
 export interface Prediction {
     id?: number
     timestamp: string
